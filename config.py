@@ -1,5 +1,24 @@
 """Configuration constants for Invoice Classifier application."""
 
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Get computer name and set path accordingly
+COMPUTER_NAME = os.getenv("COMPUTER_NAME")
+SCAN_PATH = os.getenv("SCAN_PATH")
+
+# Fallback path if not on Quality-Mgr
+DEFAULT_SCAN_PATH = r"C:\Users\TimK\Documents\Python\invcclss\scans"
+
+# Use SCAN_PATH if computer matches, otherwise use default
+ACTIVE_SCAN_PATH = (
+    SCAN_PATH if os.environ.get("COMPUTERNAME") == COMPUTER_NAME else DEFAULT_SCAN_PATH
+)
+
 # UI Configuration
 DEFAULT_LOG_HEIGHT = 15
 DEFAULT_LOG_WIDTH = 80
@@ -10,7 +29,7 @@ PROFILE_PATH = "supplier_profiles.json"
 
 # Tesseract OCR paths
 TESSERACT_FALLBACK_PATH = (
-    r"C:\Tesseract-OCR\tesseract.exe"
+    r"C:\Users\TimK\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"
 )
 
 # OCR Configuration

@@ -25,6 +25,12 @@ def configure_tesseract():
         OCR_ENABLED = True
         return True
 
+    print(f"WARNING: Tesseract not found. Checked:")
+    print(f"  1. PATH environment variable")
+    print(f"  2. {TESSERACT_FALLBACK_PATH}")
+    print(
+        f"Tesseract must be installed from: https://github.com/UB-Mannheim/tesseract/wiki"
+    )
     OCR_ENABLED = False
     return False
 
@@ -57,8 +63,7 @@ def extract_text(path):
                     pass
     except Exception as e:
         # pdfplumber failed, try PyMuPDF as fallback
-        print(
-            f"    (pdfplumber failed: {type(e).__name__}, trying PyMuPDF...)")
+        print(f"    (pdfplumber failed: {type(e).__name__}, trying PyMuPDF...)")
         try:
             doc = fitz.open(path)
             text = ""

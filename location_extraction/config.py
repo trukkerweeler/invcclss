@@ -1,8 +1,9 @@
 """
-Location configuration for PO/Amount extraction by bounding box.
+Location configuration for PO/Amount/Invoice extraction by bounding box.
 
-Each supplier can have PO and Amount locations defined as bounding boxes.
+Each supplier can have PO, Amount, and Invoice locations defined as bounding boxes.
 Coordinates are in PDF points (1/72 inch).
+At least one location must be defined per supplier.
 
 Format: {
     "supplier_code": {
@@ -13,13 +14,8 @@ Format: {
             "y1": float,      # Bottom edge
             "page": int       # Page number (0-indexed)
         },
-        "amount": {
-            "x0": float,
-            "y0": float,
-            "x1": float,
-            "y1": float,
-            "page": int
-        }
+        "amount": {...},    # Optional
+        "invoice": {...}    # Optional
     }
 }
 """
@@ -48,20 +44,39 @@ def save_config(config: Dict):
         json.dump(config, f, indent=2)
 
 
-def add_supplier_location(supplier_code: str, po_box: Dict, amount_box: Dict):
+def add_supplier_location(
+    supplier_code: str,
+    po_box: Optional[Dict] = None,
+    amount_box: Optional[Dict] = None,
+    invoice_box: Optional[Dict] = None,
+):
     """
     Add or update location mappings for a supplier.
 
     Args:
         supplier_code: Supplier code
-        po_box: {x0, y0, x1, y1, page}
-        amount_box: {x0, y0, x1, y1, page}
+        po_box: {x0, y0, x1, y1, page} (optional)
+        amount_box: {x0, y0, x1, y1, page} (optional)
+        invoice_box: {x0, y0, x1, y1, page} (optional)
+
+    Raises:
+        ValueError: If no location boxes are provided
     """
+    if not any([po_box, amount_box, invoice_box]):
+        raise ValueError(
+            "At least one location (PO, Amount, or Invoice) must be defined"
+        )
+
     config = load_config()
-    config[supplier_code] = {
-        "po": po_box,
-        "amount": amount_box
-    }
+    config[supplier_code] = {}
+
+    if po_box:
+        config[supplier_code]["po"] = po_box
+    if amount_box:
+        config[supplier_code]["amount"] = amount_box
+    if invoice_box:
+        config[supplier_code]["invoice"] = invoice_box
+
     save_config(config)
 
 
@@ -81,3 +96,9 @@ def has_amount_location(supplier_code: str) -> bool:
     """Check if supplier has Amount location defined."""
     location = get_supplier_location(supplier_code)
     return location is not None and "amount" in location
+
+
+def has_invoice_location(supplier_code: str) -> bool:
+    """Check if supplier has Invoice location defined."""
+    location = get_supplier_location(supplier_code)
+    return location is not None and "invoice" in location

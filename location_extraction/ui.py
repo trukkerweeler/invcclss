@@ -15,8 +15,7 @@ def calibrate_supplier_locations():
 
     # Get supplier code
     supplier_code = simpledialog.askstring(
-        "Supplier Code",
-        "Enter supplier code to calibrate:"
+        "Supplier Code", "Enter supplier code to calibrate:"
     )
     if not supplier_code:
         return
@@ -24,7 +23,7 @@ def calibrate_supplier_locations():
     # Get sample PDF
     pdf_path = filedialog.askopenfilename(
         title=f"Select sample invoice for {supplier_code}",
-        filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")]
+        filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
     )
     if not pdf_path:
         return
@@ -50,17 +49,20 @@ def calibrate_supplier_locations():
     state = {
         "po_rect": None,
         "amount_rect": None,
+        "invoice_rect": None,
         "start_point": None,
-        "current_mode": None,  # "po" or "amount"
+        "current_mode": None,  # "po", "amount", or "invoice"
     }
 
     # Create frame with PDF canvas
     canvas_frame = ttk.Frame(win)
-    canvas_frame.pack(side=tk.LEFT, fill=tk.BOTH,
-                      expand=True, padx=10, pady=10)
+    canvas_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-    ttk.Label(canvas_frame, text="Click and drag to define regions (scroll with mouse wheel)",
-              font=("Arial", 10)).pack()
+    ttk.Label(
+        canvas_frame,
+        text="Click and drag to define regions (scroll with mouse wheel)",
+        font=("Arial", 10),
+    ).pack()
 
     # Canvas with scrollbar for PDF display
     canvas_container = ttk.Frame(canvas_frame)
@@ -68,7 +70,8 @@ def calibrate_supplier_locations():
 
     canvas = tk.Canvas(canvas_container, cursor="crosshair", bg="white")
     scrollbar = ttk.Scrollbar(
-        canvas_container, orient=tk.VERTICAL, command=canvas.yview)
+        canvas_container, orient=tk.VERTICAL, command=canvas.yview
+    )
     canvas.configure(yscrollcommand=scrollbar.set)
 
     canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -81,7 +84,7 @@ def calibrate_supplier_locations():
 
     # Mouse wheel scrolling
     def _on_mousewheel(event):
-        canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     canvas.bind("<MouseWheel>", _on_mousewheel)
 
@@ -89,113 +92,193 @@ def calibrate_supplier_locations():
     control_frame = ttk.Frame(win)
     control_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=10, pady=10)
 
-    ttk.Label(control_frame, text="Calibration",
-              font=("Arial", 12, "bold")).pack(pady=10)
+    ttk.Label(control_frame, text="Calibration", font=("Arial", 12, "bold")).pack(
+        pady=10
+    )
 
     # PO section
-    ttk.Label(control_frame, text="1. Select PO Location", font=(
-        "Arial", 11, "bold")).pack(anchor=tk.W, pady=(10, 5))
+    ttk.Label(
+        control_frame,
+        text="1. Select PO Location (Optional)",
+        font=("Arial", 11, "bold"),
+    ).pack(anchor=tk.W, pady=(10, 5))
 
     def start_po_selection():
         state["current_mode"] = "po"
         messagebox.showinfo(
-            "PO Selection", "Click and drag on the PDF to select PO region")
+            "PO Selection",
+            "Click and drag on the PDF to select PO region\n(Optional - skip if document has no PO)",
+        )
 
-    ttk.Button(control_frame, text="Define PO Region",
-               command=start_po_selection, width=25).pack(pady=5, fill=tk.X)
+    ttk.Button(
+        control_frame,
+        text="Define PO Region (Skip if None)",
+        command=start_po_selection,
+        width=25,
+    ).pack(pady=5, fill=tk.X)
 
-    po_label = ttk.Label(control_frame, text="PO: Not set", foreground="red")
+    po_label = ttk.Label(
+        control_frame, text="PO: Not set (Optional)", foreground="orange"
+    )
     po_label.pack(anchor=tk.W, padx=5)
 
-    # Amount section
-    ttk.Label(control_frame, text="2. Select Amount Location", font=(
-        "Arial", 11, "bold")).pack(anchor=tk.W, pady=(15, 5))
+    # Amount section (optional)
+    ttk.Label(
+        control_frame,
+        text="2. Select Amount Location (Optional)",
+        font=("Arial", 11, "bold"),
+    ).pack(anchor=tk.W, pady=(15, 5))
 
     def start_amount_selection():
         state["current_mode"] = "amount"
         messagebox.showinfo(
-            "Amount Selection", "Click and drag on the PDF to select Amount region")
+            "Amount Selection",
+            "Click and drag on the PDF to select Amount region\n(Optional - skip if document has no amount)",
+        )
 
-    ttk.Button(control_frame, text="Define Amount Region",
-               command=start_amount_selection, width=25).pack(pady=5, fill=tk.X)
+    ttk.Button(
+        control_frame,
+        text="Define Amount Region (Skip if None)",
+        command=start_amount_selection,
+        width=25,
+    ).pack(pady=5, fill=tk.X)
 
     amount_label = ttk.Label(
-        control_frame, text="Amount: Not set", foreground="red")
+        control_frame, text="Amount: Not set (Optional)", foreground="orange"
+    )
     amount_label.pack(anchor=tk.W, padx=5)
 
-    # Preview section
-    ttk.Label(control_frame, text="3. Save Locations", font=(
-        "Arial", 11, "bold")).pack(anchor=tk.W, pady=(15, 5))
+    # Invoice section (optional)
+    ttk.Label(
+        control_frame,
+        text="3. Select Invoice Location (Optional)",
+        font=("Arial", 11, "bold"),
+    ).pack(anchor=tk.W, pady=(15, 5))
+
+    def start_invoice_selection():
+        state["current_mode"] = "invoice"
+        messagebox.showinfo(
+            "Invoice Selection",
+            "Click and drag on the PDF to select Invoice Number region\n(Optional - skip if document has no invoice number)",
+        )
+
+    ttk.Button(
+        control_frame,
+        text="Define Invoice Region (Skip if None)",
+        command=start_invoice_selection,
+        width=25,
+    ).pack(pady=5, fill=tk.X)
+
+    invoice_label = ttk.Label(
+        control_frame, text="Invoice: Not set (Optional)", foreground="orange"
+    )
+    invoice_label.pack(anchor=tk.W, padx=5)
+
+    # Save section
+    ttk.Label(control_frame, text="4. Save Locations", font=("Arial", 11, "bold")).pack(
+        anchor=tk.W, pady=(15, 5)
+    )
 
     def save_locations():
-        if not state["po_rect"] or not state["amount_rect"]:
+        if not any([state["po_rect"], state["amount_rect"], state["invoice_rect"]]):
             messagebox.showerror(
-                "Error", "Both PO and Amount regions must be defined")
+                "Error",
+                "At least one location (PO, Amount, or Invoice) must be defined",
+            )
             return
 
-        po_box = {
-            "x0": state["po_rect"]["x0"],
-            "y0": state["po_rect"]["y0"],
-            "x1": state["po_rect"]["x1"],
-            "y1": state["po_rect"]["y1"],
-            "page": 0
-        }
+        po_box = None
+        if state["po_rect"]:
+            po_box = {
+                "x0": state["po_rect"]["x0"],
+                "y0": state["po_rect"]["y0"],
+                "x1": state["po_rect"]["x1"],
+                "y1": state["po_rect"]["y1"],
+                "page": 0,
+            }
 
-        amount_box = {
-            "x0": state["amount_rect"]["x0"],
-            "y0": state["amount_rect"]["y0"],
-            "x1": state["amount_rect"]["x1"],
-            "y1": state["amount_rect"]["y1"],
-            "page": 0
-        }
+        amount_box = None
+        if state["amount_rect"]:
+            amount_box = {
+                "x0": state["amount_rect"]["x0"],
+                "y0": state["amount_rect"]["y0"],
+                "x1": state["amount_rect"]["x1"],
+                "y1": state["amount_rect"]["y1"],
+                "page": 0,
+            }
 
-        add_supplier_location(supplier_code, po_box, amount_box)
-        messagebox.showinfo("Success", f"Locations saved for {supplier_code}")
+        invoice_box = None
+        if state["invoice_rect"]:
+            invoice_box = {
+                "x0": state["invoice_rect"]["x0"],
+                "y0": state["invoice_rect"]["y0"],
+                "x1": state["invoice_rect"]["x1"],
+                "y1": state["invoice_rect"]["y1"],
+                "page": 0,
+            }
+
+        add_supplier_location(supplier_code, po_box, amount_box, invoice_box)
+
+        # Build list of defined fields
+        defined = []
+        if po_box:
+            defined.append("PO")
+        if amount_box:
+            defined.append("Amount")
+        if invoice_box:
+            defined.append("Invoice")
+
+        defined_text = "Defined: " + ", ".join(defined)
+        messagebox.showinfo(
+            "Success", f"Locations saved for {supplier_code}\n{defined_text}"
+        )
         win.destroy()
 
-    ttk.Button(control_frame, text="Save Locations",
-               command=save_locations, width=25).pack(pady=5, fill=tk.X)
+    ttk.Button(
+        control_frame, text="Save Locations", command=save_locations, width=25
+    ).pack(pady=5, fill=tk.X)
 
-    ttk.Button(control_frame, text="Cancel", command=win.destroy,
-               width=25).pack(pady=5, fill=tk.X)
+    ttk.Button(control_frame, text="Cancel", command=win.destroy, width=25).pack(
+        pady=5, fill=tk.X
+    )
 
     # Canvas event handlers for drawing rectangles
     def on_canvas_press(event):
-        # Get scroll offset
-        scroll_y = canvas.yview()[0] * canvas.bbox("all")[3]
-        state["start_point"] = (event.x, event.y + scroll_y)
+        # Convert screen coordinates to canvas coordinates
+        x = canvas.canvasx(event.x)
+        y = canvas.canvasy(event.y)
+        state["start_point"] = (x, y)
 
     def on_canvas_drag(event):
         if not state["start_point"] or not state["current_mode"]:
             return
 
-        # Get scroll offset
-        scroll_y = canvas.yview()[0] * canvas.bbox("all")[3]
+        # Convert screen coordinates to canvas coordinates
+        x = canvas.canvasx(event.x)
+        y = canvas.canvasy(event.y)
 
         # Clear previous rectangle for current mode
         tag = f"{state['current_mode']}_rect"
         canvas.delete(tag)
 
         x0, y0 = state["start_point"]
-        x1 = event.x
-        y1 = event.y + scroll_y
+        x1 = x
+        y1 = y
 
-        # Draw rectangle (adjust for scroll when displaying)
-        display_y0 = y0 - scroll_y
-        display_y1 = y1 - scroll_y
-        canvas.create_rectangle(
-            x0, display_y0, x1, display_y1, outline="red", width=2, tags=tag)
+        # Draw rectangle
+        canvas.create_rectangle(x0, y0, x1, y1, outline="red", width=2, tags=tag)
 
     def on_canvas_release(event):
         if not state["start_point"] or not state["current_mode"]:
             return
 
-        # Get scroll offset
-        scroll_y = canvas.yview()[0] * canvas.bbox("all")[3]
+        # Convert screen coordinates to canvas coordinates
+        x = canvas.canvasx(event.x)
+        y = canvas.canvasy(event.y)
 
         x0, y0 = state["start_point"]
-        x1 = event.x
-        y1 = event.y + scroll_y
+        x1 = x
+        y1 = y
 
         # Normalize coordinates
         if x0 > x1:
@@ -209,11 +292,21 @@ def calibrate_supplier_locations():
         if state["current_mode"] == "po":
             state["po_rect"] = rect
             po_label.config(
-                text=f"PO: ({rect['x0']:.0f}, {rect['y0']:.0f}) - ({rect['x1']:.0f}, {rect['y1']:.0f})", foreground="green")
+                text=f"PO: ({rect['x0']:.0f}, {rect['y0']:.0f}) - ({rect['x1']:.0f}, {rect['y1']:.0f})",
+                foreground="green",
+            )
         elif state["current_mode"] == "amount":
             state["amount_rect"] = rect
             amount_label.config(
-                text=f"Amount: ({rect['x0']:.0f}, {rect['y0']:.0f}) - ({rect['x1']:.0f}, {rect['y1']:.0f})", foreground="green")
+                text=f"Amount: ({rect['x0']:.0f}, {rect['y0']:.0f}) - ({rect['x1']:.0f}, {rect['y1']:.0f})",
+                foreground="green",
+            )
+        elif state["current_mode"] == "invoice":
+            state["invoice_rect"] = rect
+            invoice_label.config(
+                text=f"Invoice: ({rect['x0']:.0f}, {rect['y0']:.0f}) - ({rect['x1']:.0f}, {rect['y1']:.0f})",
+                foreground="green",
+            )
 
         state["current_mode"] = None
         state["start_point"] = None
@@ -229,11 +322,22 @@ def calibrate_supplier_locations():
             po_box = existing["po"]
             state["po_rect"] = po_box
             po_label.config(
-                text=f"PO: ({po_box['x0']:.0f}, {po_box['y0']:.0f}) - ({po_box['x1']:.0f}, {po_box['y1']:.0f})", foreground="green")
+                text=f"PO: ({po_box['x0']:.0f}, {po_box['y0']:.0f}) - ({po_box['x1']:.0f}, {po_box['y1']:.0f})",
+                foreground="green",
+            )
         if "amount" in existing:
             amt_box = existing["amount"]
             state["amount_rect"] = amt_box
             amount_label.config(
-                text=f"Amount: ({amt_box['x0']:.0f}, {amt_box['y0']:.0f}) - ({amt_box['x1']:.0f}, {amt_box['y1']:.0f})", foreground="green")
+                text=f"Amount: ({amt_box['x0']:.0f}, {amt_box['y0']:.0f}) - ({amt_box['x1']:.0f}, {amt_box['y1']:.0f})",
+                foreground="green",
+            )
+        if "invoice" in existing:
+            inv_box = existing["invoice"]
+            state["invoice_rect"] = inv_box
+            invoice_label.config(
+                text=f"Invoice: ({inv_box['x0']:.0f}, {inv_box['y0']:.0f}) - ({inv_box['x1']:.0f}, {inv_box['y1']:.0f})",
+                foreground="green",
+            )
 
     win.mainloop()
