@@ -1,0 +1,29 @@
+# Environment
+.env
+.venv
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Logs
+*.log
+
+# Generated/Temporary
+po_extraction_progress.json
+po_extraction_results.json
+*.tmp
