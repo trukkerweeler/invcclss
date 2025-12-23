@@ -18,6 +18,7 @@ from location_extraction.extractor import (
     extract_amount_from_location,
 )
 from location_extraction.config import get_supplier_location, load_config
+from document_processor import DocumentProcessor
 
 
 class InvoiceClassifierApp:
@@ -34,6 +35,15 @@ class InvoiceClassifierApp:
         # Create menu bar
         menubar = tk.Menu(root)
         root.config(menu=menubar)
+
+        # File menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(
+            label="Document Processor", command=self.open_document_processor
+        )
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=root.quit)
 
         # Tools menu
         tools_menu = tk.Menu(menubar, tearoff=0)
@@ -68,6 +78,13 @@ class InvoiceClassifierApp:
         self.log.insert(
             tk.END, f"OCR manually {'enabled' if self.ocr_var.get() else 'disabled'}\n"
         )
+
+    def open_document_processor(self):
+        """Open the document processor in a new window."""
+        processor_window = tk.Toplevel(self.root)
+        processor_window.geometry("1400x900")
+        app = DocumentProcessor(processor_window)
+        self.log.insert(tk.END, "Document Processor opened\n")
 
     def add_samples(self):
         """Add sample invoices for training."""

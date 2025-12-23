@@ -25,7 +25,9 @@ DEFAULT_LOG_WIDTH = 80
 APP_TITLE = "Invoice Classifier"
 
 # File paths
-PROFILE_PATH = "supplier_profiles.json"
+PROFILE_PATH = (
+    r"C:\Users\TimK\OneDrive\Documents\Work\CI\APScans\supplier_profiles.json"
+)
 
 # Tesseract OCR paths
 TESSERACT_FALLBACK_PATH = (

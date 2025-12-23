@@ -24,7 +24,7 @@ import json
 import os
 from typing import Dict, Optional
 
-CONFIG_FILE = "location_mappings.json"
+CONFIG_FILE = r"C:\Users\TimK\OneDrive\Documents\Work\CI\APScans\location_mappings.json"
 
 
 def load_config() -> Dict:

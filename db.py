@@ -3,9 +3,13 @@ import json
 import sqlite3
 from typing import Dict, List, Optional
 
-DB_PATH = "invoice_system.db"
-SUPPLIER_JSON = "supplier_profiles.json"
-PO_DETECTION_JSON = "po_detection_profiles.json"
+DB_PATH = r"C:\Users\TimK\OneDrive\Documents\Work\CI\APScans\invoice_system.db"
+SUPPLIER_JSON = (
+    r"C:\Users\TimK\OneDrive\Documents\Work\CI\APScans\supplier_profiles.json"
+)
+PO_DETECTION_JSON = (
+    r"C:\Users\TimK\OneDrive\Documents\Work\CI\APScans\po_detection_profiles.json"
+)
 
 
 def init_db(db_path: str = DB_PATH):
@@ -52,6 +56,7 @@ def init_db(db_path: str = DB_PATH):
             amount REAL,
             check_no TEXT,
             receiver_id TEXT,
+            invoice_no TEXT,
             human_field TEXT DEFAULT 'N',
             status TEXT DEFAULT 'pending',
             extraction_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -70,6 +75,13 @@ def init_db(db_path: str = DB_PATH):
         )
         """
     )
+
+    # Add missing columns to existing tables (migration support)
+    try:
+        cur.execute("ALTER TABLE extraction_results ADD COLUMN invoice_no TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     conn.commit()
     conn.close()
 
@@ -87,7 +99,9 @@ def get_classification_profiles(db_path: str = DB_PATH) -> Dict[str, List[str]]:
     return profiles
 
 
-def save_classification_profiles(profiles: Dict[str, List[str]], db_path: str = DB_PATH):
+def save_classification_profiles(
+    profiles: Dict[str, List[str]], db_path: str = DB_PATH
+):
     init_db(db_path)
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
@@ -103,7 +117,9 @@ def save_classification_profiles(profiles: Dict[str, List[str]], db_path: str = 
     conn.close()
 
 
-def add_classification_samples(supplier: str, samples: List[str], db_path: str = DB_PATH):
+def add_classification_samples(
+    supplier: str, samples: List[str], db_path: str = DB_PATH
+):
     init_db(db_path)
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
@@ -120,8 +136,7 @@ def get_po_profiles(db_path: str = DB_PATH) -> Dict[str, Dict]:
     init_db(db_path)
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
-    cur.execute(
-        "SELECT supplier_code, po_patterns, amount_patterns FROM po_profiles")
+    cur.execute("SELECT supplier_code, po_patterns, amount_patterns FROM po_profiles")
     rows = cur.fetchall()
     conn.close()
     profiles: Dict[str, Dict] = {}
@@ -156,7 +171,9 @@ def save_po_profiles(profiles: Dict[str, Dict], db_path: str = DB_PATH):
     conn.close()
 
 
-def add_supplier_profile(supplier_code: str, name: str = "", description: str = "", db_path: str = DB_PATH):
+def add_supplier_profile(
+    supplier_code: str, name: str = "", description: str = "", db_path: str = DB_PATH
+):
     """Add or update a supplier profile."""
     init_db(db_path)
     conn = sqlite3.connect(db_path)
@@ -207,20 +224,39 @@ def get_all_supplier_profiles(db_path: str = DB_PATH) -> List[Dict]:
     ]
 
 
-def save_extraction_result(filename: str, file_path: str, supplier_code: Optional[str] = None,
-                           po_number: Optional[str] = None, amount: Optional[float] = None,
-                           check_no: Optional[str] = None, receiver_id: Optional[str] = None,
-                           human_field: str = "N", status: str = "pending", db_path: str = DB_PATH):
+def save_extraction_result(
+    filename: str,
+    file_path: str,
+    supplier_code: Optional[str] = None,
+    po_number: Optional[str] = None,
+    amount: Optional[float] = None,
+    check_no: Optional[str] = None,
+    receiver_id: Optional[str] = None,
+    invoice_no: Optional[str] = None,
+    human_field: str = "N",
+    status: str = "pending",
+    db_path: str = DB_PATH,
+):
     """Save an extraction result to the database."""
     init_db(db_path)
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     cur.execute(
         """INSERT OR REPLACE INTO extraction_results 
-        (filename, file_path, supplier_code, po_number, amount, check_no, receiver_id, human_field, status, processed_date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
-        (filename, file_path, supplier_code, po_number,
-         amount, check_no, receiver_id, human_field, status),
+        (filename, file_path, supplier_code, po_number, amount, check_no, receiver_id, invoice_no, human_field, status, extraction_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+        (
+            filename,
+            file_path,
+            supplier_code,
+            po_number,
+            amount,
+            check_no,
+            receiver_id,
+            invoice_no,
+            human_field,
+            status,
+        ),
     )
     conn.commit()
     conn.close()
@@ -261,13 +297,16 @@ def get_unprocessed_files(db_path: str = DB_PATH) -> List[str]:
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     cur.execute(
-        "SELECT filename FROM extraction_results WHERE status = 'pending' ORDER BY filename")
+        "SELECT filename FROM extraction_results WHERE status = 'pending' ORDER BY filename"
+    )
     rows = cur.fetchall()
     conn.close()
     return [row[0] for row in rows]
 
 
-def update_extraction_status(filename: str, status: str, notes: str = "", db_path: str = DB_PATH):
+def update_extraction_status(
+    filename: str, status: str, notes: str = "", db_path: str = DB_PATH
+):
     """Update processing progress for a file."""
     init_db(db_path)
     conn = sqlite3.connect(db_path)
@@ -280,7 +319,11 @@ def update_extraction_status(filename: str, status: str, notes: str = "", db_pat
     conn.close()
 
 
-def migrate_jsons_to_db(db_path: str = DB_PATH, supplier_json: str = SUPPLIER_JSON, po_json: str = PO_DETECTION_JSON):
+def migrate_jsons_to_db(
+    db_path: str = DB_PATH,
+    supplier_json: str = SUPPLIER_JSON,
+    po_json: str = PO_DETECTION_JSON,
+):
     init_db(db_path)
     # Migrate supplier_profiles.json
     if os.path.exists(supplier_json):
@@ -313,10 +356,8 @@ def migrate_jsons_to_db(db_path: str = DB_PATH, supplier_json: str = SUPPLIER_JS
                     conn = sqlite3.connect(db_path)
                     cur = conn.cursor()
                     for supplier, profile in data.items():
-                        po_patterns = json.dumps(
-                            profile.get("po_patterns", []))
-                        amount_patterns = json.dumps(
-                            profile.get("amount_patterns", []))
+                        po_patterns = json.dumps(profile.get("po_patterns", []))
+                        amount_patterns = json.dumps(profile.get("amount_patterns", []))
                         cur.execute(
                             "INSERT OR REPLACE INTO po_profiles (supplier_code, po_patterns, amount_patterns) VALUES (?, ?, ?)",
                             (supplier, po_patterns, amount_patterns),

@@ -25,6 +25,15 @@ from db import (
     update_extraction_status,
 )
 from config import SCAN_PATH
+from location_extraction.extractor import (
+    extract_po_from_location,
+    extract_amount_from_location,
+)
+from location_extraction.config import (
+    get_supplier_location,
+    has_po_location,
+    has_amount_location,
+)
 from typing import Dict, Optional, List, Tuple
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
@@ -45,7 +54,9 @@ RESULTS_FILE = "po_extraction_results.json"
 PROGRESS_FILE = "po_extraction_progress.json"
 UNCONFIRMED_FILE = "po_unconfirmed.json"
 SUPPLIER_PROFILES_FILE = "supplier_profiles.json"
-PO_DETECTION_PROFILES_FILE = "po_detection_profiles.json"
+PO_DETECTION_PROFILES_FILE = (
+    r"C:\Users\TimK\OneDrive\Documents\Work\CI\APScans\po_detection_profiles.json"
+)
 
 # PO number patterns - Looking for 5 digit POs (e.g., 40085) or 7 digit with leading 00 (e.g., 0040085)
 # Optional -dd suffix for line numbers (e.g., 40085-05 or 0040085-05)
@@ -1085,17 +1096,17 @@ class POConfirmationUI:
 
 def match_supplier_from_filename(filename: str) -> Optional[str]:
     """Match supplier code from filename pattern YYYY-MM_SUPPLIERCODE_..."""
-    match = re.search(r"^\d{4}-\d{2}_([A-Z0-9]+)_", filename)
-    return match.group(1) if match else None
+    match = re.search(r"^\d{4}-\d{2}_([A-Z0-9&\-\s]+?)_", filename)
+    return match.group(1).strip() if match else None
 
 
 def create_manual_entry_ui(
     pdf_path: str, filename: str, text: str, po_candidates: List[str]
-) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
-    """Display PDF with input fields for manual PO and amount entry."""
+) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]]:
+    """Display PDF with input fields for manual PO, invoice no, amount, check no, and receiver ID entry."""
     win = tk.Tk()
     win.title(f"Manual Entry: {filename}")
-    win.geometry("1400x800")
+    win.geometry("1400x800+100+50")  # +100+50 offsets window position to the right
 
     # File info at top
     info_frame = ttk.Frame(win)
@@ -1156,6 +1167,14 @@ def create_manual_entry_ui(
     amount_entry = ttk.Entry(entry_frame, textvariable=amount_var, width=20)
     amount_entry.pack(anchor=tk.W, padx=5, pady=(0, 8))
 
+    # Invoice No
+    ttk.Label(entry_frame, text="Invoice No:", font=("Arial", 10)).pack(
+        anchor=tk.W, padx=5, pady=(10, 2)
+    )
+    invoice_var = tk.StringVar()
+    invoice_entry = ttk.Entry(entry_frame, textvariable=invoice_var, width=20)
+    invoice_entry.pack(anchor=tk.W, padx=5, pady=(0, 8))
+
     # Check No
     ttk.Label(entry_frame, text="Check No:", font=("Arial", 10)).pack(
         anchor=tk.W, padx=5, pady=(10, 2)
@@ -1179,6 +1198,7 @@ def create_manual_entry_ui(
     result = {
         "po": None,
         "amount": None,
+        "invoice": None,
         "check": None,
         "receiver": None,
         "save": False,
@@ -1187,6 +1207,7 @@ def create_manual_entry_ui(
     def save_and_close():
         result["po"] = po_var.get().strip() or None
         result["amount"] = amount_var.get().strip() or None
+        result["invoice"] = invoice_var.get().strip() or None
         result["check"] = check_var.get().strip() or None
         result["receiver"] = receiver_var.get().strip() or None
         result["save"] = True
@@ -1209,8 +1230,8 @@ def create_manual_entry_ui(
         pdf_doc = fitz.open(pdf_path)
         page = pdf_doc[0]
         pix = page.get_pixmap(
-            matrix=fitz.Matrix(0.75, 0.75)
-        )  # 75% scale for larger display
+            matrix=fitz.Matrix(0.9, 0.9)
+        )  # 90% scale for larger display (20% increase)
         img_data = pix.tobytes("ppm")
         img = Image.open(io.BytesIO(img_data))
 
@@ -1224,7 +1245,13 @@ def create_manual_entry_ui(
         ttk.Label(pdf_frame, text=f"Could not load PDF: {e}").pack()
 
     win.mainloop()
-    return result["po"], result["amount"], result["check"], result["receiver"]
+    return (
+        result["po"],
+        result["amount"],
+        result["invoice"],
+        result["check"],
+        result["receiver"],
+    )
 
 
 def process_file_with_supplier(pdf_path: str, filename: str) -> Dict:
@@ -1238,6 +1265,7 @@ def process_file_with_supplier(pdf_path: str, filename: str) -> Dict:
         "supplier": None,
         "po_number": None,
         "amount": None,
+        "invoice_no": None,
         "check_no": None,
         "receiver_id": None,
         "human_field": "N",
@@ -1246,6 +1274,14 @@ def process_file_with_supplier(pdf_path: str, filename: str) -> Dict:
     }
 
     try:
+        # Step 0: Check date format - skip YYYY-MMDD format (invalid)
+        if re.match(r"^\d{4}-\d{4}_", filename):
+            result[
+                "notes"
+            ] += "Skipped: Invalid date format (YYYY-MMDD). Expected YYYY-MM."
+            result["status"] = "skipped"
+            return result
+
         # Step 1: Extract text
         text = extract_text(pdf_path)
         result["notes"] += "Text extracted. "
@@ -1261,20 +1297,47 @@ def process_file_with_supplier(pdf_path: str, filename: str) -> Dict:
         supplier_profile = get_supplier_profile(supplier_code)
         result["notes"] += f"Supplier matched: {supplier_code}. "
 
-        # Step 3: Extract PO using supplier profile
-        po_candidates = extract_po_with_supplier_profile(text, supplier_code)
+        # Step 3: Extract PO (location first, then text patterns)
+        po_candidates = []
+
+        # Try location-based extraction first
+        if has_po_location(supplier_code):
+            po_from_location = extract_po_from_location(pdf_path, supplier_code)
+            if po_from_location:
+                po_candidates = [po_from_location]
+                result["notes"] += "PO extracted (location). "
+
+        # Fall back to text patterns if location didn't find it
+        if not po_candidates:
+            po_candidates = extract_po_with_supplier_profile(text, supplier_code)
+            if po_candidates:
+                result["notes"] += "PO extracted (text pattern). "
+            else:
+                result["notes"] += "No PO found. "
+
         if po_candidates:
             result["po_number"] = po_candidates[0]
-            result["notes"] += f"PO extracted: {result['po_number']}. "
-        else:
-            result["notes"] += "No PO found. "
 
-        # Step 4: Extract amount
-        amount = extract_amount_from_text(text, supplier_code)
+        # Step 4: Extract amount (location first, then text patterns)
+        amount = None
+
+        # Try location-based extraction first
+        if has_amount_location(supplier_code):
+            amount = extract_amount_from_location(pdf_path, supplier_code)
+            if amount:
+                result["notes"] += f"Amount extracted (location): {amount}. "
+
+        # Fall back to text patterns if location didn't find it
+        if not amount:
+            amount = extract_amount_from_text(text, supplier_code)
+            if amount:
+                result["notes"] += f"Amount extracted (text pattern): {amount}. "
+            else:
+                result["notes"] += "No amount found. "
+
         if amount:
             try:
                 result["amount"] = float(amount)
-                result["notes"] += f"Amount extracted: {amount}. "
             except ValueError:
                 result["notes"] += f"Amount parse error: {amount}. "
 
@@ -1288,34 +1351,46 @@ def process_file_with_supplier(pdf_path: str, filename: str) -> Dict:
             result["human_field"] = "Y"  # Needs human review/entry
             result["notes"] += "Incomplete - opening manual entry UI. "
 
-            # Show manual entry UI
-            po, amount, check, receiver = create_manual_entry_ui(
-                pdf_path, filename, text, po_candidates or []
-            )
-            if po is not None or amount is not None:
-                if po:
-                    result["po_number"] = po
-                if amount:
-                    try:
-                        result["amount"] = float(amount)
-                    except (ValueError, TypeError):
-                        pass
-                if check:
-                    result["check_no"] = check
-                if receiver:
-                    result["receiver_id"] = receiver
-                result["notes"] += "Manual entry completed. "
-                result["status"] = "complete_manual"
-            else:
-                result["notes"] += "Manual entry skipped by user. "
+        # Step 6: Show manual entry UI for verification (whether complete or incomplete)
+        po, amount, invoice, check, receiver = create_manual_entry_ui(
+            pdf_path, filename, text, po_candidates or []
+        )
+        if (
+            po is not None
+            or amount is not None
+            or invoice is not None
+            or po is not None
+            and amount is not None
+        ):
+            if po:
+                result["po_number"] = po
+            if amount:
+                try:
+                    result["amount"] = float(amount)
+                except (ValueError, TypeError):
+                    pass
+            if invoice:
+                result["invoice_no"] = invoice
+            if check:
+                result["check_no"] = check
+            if receiver:
+                result["receiver_id"] = receiver
+            result["notes"] += "Manual verification completed. "
+            result["status"] = "complete_manual"
+        else:
+            # User closed UI without making changes
+            result["notes"] += "Manual verification skipped by user. "
+            if result["status"] == "incomplete":
+                result["status"] = "incomplete"
 
-        # Step 6: Save to database
+        # Step 7: Save to database
         save_extraction_result(
             filename=filename,
             file_path=pdf_path,
             supplier_code=supplier_code,
             po_number=result["po_number"],
             amount=result["amount"],
+            invoice_no=result["invoice_no"],
             check_no=result["check_no"],
             receiver_id=result["receiver_id"],
             human_field=result["human_field"],
@@ -1987,7 +2062,16 @@ def main(use_ui: bool = True):
     # Show main menu
     root = tk.Tk()
     root.title("Invoice Processing Suite")
-    root.geometry("500x800")
+    root.geometry("500x800+100+50")  # +100+50 offsets window position to the right
+
+    # Create menu bar
+    menubar = tk.Menu(root)
+    root.config(menu=menubar)
+
+    # File menu
+    file_menu = tk.Menu(menubar, tearoff=0)
+    menubar.add_cascade(label="File", menu=file_menu)
+    file_menu.add_command(label="Exit", command=lambda: root.quit())
 
     ttk.Label(root, text="Invoice Processing Suite", font=("Arial", 16, "bold")).pack(
         pady=20
