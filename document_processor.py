@@ -121,9 +121,8 @@ class DocumentProcessor:
 
         # Right side - Form editor
         right_frame = ttk.LabelFrame(main_frame, text="Extracted Data")
-        right_frame.pack(
-            side=tk.RIGHT, fill=tk.BOTH, expand=False, padx=(5, 0), width=400
-        )
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=False, padx=(5, 0))
+        right_frame.configure(width=400)
 
         # Form fields
         fields_frame = ttk.Frame(right_frame)

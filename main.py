@@ -28,11 +28,13 @@ from config import SCAN_PATH
 from location_extraction.extractor import (
     extract_po_from_location,
     extract_amount_from_location,
+    extract_invoice_from_location,
 )
 from location_extraction.config import (
     get_supplier_location,
     has_po_location,
     has_amount_location,
+    has_invoice_location,
 )
 from typing import Dict, Optional, List, Tuple
 import tkinter as tk
@@ -319,6 +321,9 @@ def extract_po_with_supplier_profile(
                 match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 po = match.group(1)
+                # Skip if no PO was captured (group 1 is optional)
+                if po is None:
+                    continue
                 # Normalize PO (strip leading zeros)
                 if "-" in po:
                     main_part, suffix = po.split("-")
@@ -1095,13 +1100,31 @@ class POConfirmationUI:
 
 
 def match_supplier_from_filename(filename: str) -> Optional[str]:
-    """Match supplier code from filename pattern YYYY-MM_SUPPLIERCODE_..."""
+    """Match supplier code from filename pattern YYYY-MM_SUPPLIERCODE_...
+    Primary pattern: YYYY-MM_SUPPLIERCODE_...
+    Fallback: splits on underscore and takes second element"""
+    # Try primary pattern: YYYY-MM_SUPPLIERCODE_
     match = re.search(r"^\d{4}-\d{2}_([A-Z0-9&\-\s]+?)_", filename)
-    return match.group(1).strip() if match else None
+    if match:
+        return match.group(1).strip()
+
+    # Fallback: split on underscore and take second element (index 1)
+    parts = filename.split("_")
+    if len(parts) >= 2:
+        supplier_code = parts[1].strip()
+        if supplier_code:  # Make sure it's not empty
+            return supplier_code
+
+    return None
 
 
 def create_manual_entry_ui(
-    pdf_path: str, filename: str, text: str, po_candidates: List[str]
+    pdf_path: str,
+    filename: str,
+    text: str,
+    po_candidates: List[str],
+    extracted_amount: Optional[str] = None,
+    extracted_invoice: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]]:
     """Display PDF with input fields for manual PO, invoice no, amount, check no, and receiver ID entry."""
     win = tk.Tk()
@@ -1163,7 +1186,7 @@ def create_manual_entry_ui(
     ttk.Label(entry_frame, text="Amount:", font=("Arial", 10)).pack(
         anchor=tk.W, padx=5, pady=(10, 2)
     )
-    amount_var = tk.StringVar()
+    amount_var = tk.StringVar(value=extracted_amount or "")
     amount_entry = ttk.Entry(entry_frame, textvariable=amount_var, width=20)
     amount_entry.pack(anchor=tk.W, padx=5, pady=(0, 8))
 
@@ -1171,7 +1194,7 @@ def create_manual_entry_ui(
     ttk.Label(entry_frame, text="Invoice No:", font=("Arial", 10)).pack(
         anchor=tk.W, padx=5, pady=(10, 2)
     )
-    invoice_var = tk.StringVar()
+    invoice_var = tk.StringVar(value=extracted_invoice or "")
     invoice_entry = ttk.Entry(entry_frame, textvariable=invoice_var, width=20)
     invoice_entry.pack(anchor=tk.W, padx=5, pady=(0, 8))
 
@@ -1259,6 +1282,10 @@ def process_file_with_supplier(pdf_path: str, filename: str) -> Dict:
     Process a single file: identify supplier, extract PO/amount using profile,
     display manual entry UI if needed, save to database.
     """
+    import sys
+
+    sys.stdout.flush()  # Ensure output is flushed to terminal
+
     result = {
         "filename": filename,
         "path": pdf_path,
@@ -1280,6 +1307,20 @@ def process_file_with_supplier(pdf_path: str, filename: str) -> Dict:
                 "notes"
             ] += "Skipped: Invalid date format (YYYY-MMDD). Expected YYYY-MM."
             result["status"] = "skipped"
+            # Save to database before returning
+            save_extraction_result(
+                filename=filename,
+                file_path=pdf_path,
+                supplier_code="N/A",
+                po_number=None,
+                amount=None,
+                invoice_no=None,
+                check_no=None,
+                receiver_id=None,
+                human_field="N",
+                status="skipped",
+            )
+            update_extraction_status(filename, "skipped", result["notes"])
             return result
 
         # Step 1: Extract text
@@ -1341,7 +1382,17 @@ def process_file_with_supplier(pdf_path: str, filename: str) -> Dict:
             except ValueError:
                 result["notes"] += f"Amount parse error: {amount}. "
 
-        # Step 5: Check if data is complete
+        # Step 5: Extract invoice (location-based only)
+        invoice = None
+        if has_invoice_location(supplier_code):
+            invoice = extract_invoice_from_location(pdf_path, supplier_code)
+            if invoice:
+                result["invoice_no"] = invoice
+                result["notes"] += f"Invoice extracted (location): {invoice}. "
+            else:
+                result["notes"] += "No invoice found. "
+
+        # Step 6: Check if data is complete
         if result["po_number"] and result["amount"]:
             result["status"] = "complete"
             result["human_field"] = "N"
@@ -1352,9 +1403,20 @@ def process_file_with_supplier(pdf_path: str, filename: str) -> Dict:
             result["notes"] += "Incomplete - opening manual entry UI. "
 
         # Step 6: Show manual entry UI for verification (whether complete or incomplete)
-        po, amount, invoice, check, receiver = create_manual_entry_ui(
-            pdf_path, filename, text, po_candidates or []
-        )
+        try:
+            po, amount, invoice, check, receiver = create_manual_entry_ui(
+                pdf_path,
+                filename,
+                text,
+                po_candidates or [],
+                str(result.get("amount", "")) or "",
+                result.get("invoice_no") or "",
+            )
+        except Exception as e:
+            print(f"  ✗ Error in manual entry UI: {e}")
+            result["notes"] += f"Manual entry UI error: {str(e)}. "
+            po, amount, invoice, check, receiver = None, None, None, None, None
+
         if (
             po is not None
             or amount is not None
@@ -1390,9 +1452,11 @@ def process_file_with_supplier(pdf_path: str, filename: str) -> Dict:
             supplier_code=supplier_code,
             po_number=result["po_number"],
             amount=result["amount"],
-            invoice_no=result["invoice_no"],
+            invoice_no=result["invoice_no"].upper() if result["invoice_no"] else None,
             check_no=result["check_no"],
-            receiver_id=result["receiver_id"],
+            receiver_id=(
+                result["receiver_id"].upper() if result["receiver_id"] else None
+            ),
             human_field=result["human_field"],
             status=result["status"],
         )
@@ -1403,7 +1467,9 @@ def process_file_with_supplier(pdf_path: str, filename: str) -> Dict:
         import traceback
 
         result["status"] = "error"
-        result["notes"] += f"Error: {str(e)}. {traceback.format_exc()}"
+        error_msg = f"{str(e)}\n{traceback.format_exc()}"
+        result["notes"] += f"Error: {error_msg}. "
+        print(f"  ✗ Exception occurred: {error_msg}")
         update_extraction_status(filename, "error", result["notes"])
 
     return result
@@ -1456,16 +1522,20 @@ def process_batch_improved(batch_size: int = 10) -> tuple:
         processed_count += 1
 
         if result["status"] in ["complete", "complete_manual"]:
-            print(f"  ✓ Complete: PO={result['po_number']}, Amount={result['amount']}")
+            print(
+                f"  ✓ Complete: PO={result['po_number']}, Amount={result['amount']}, Invoice={result.get('invoice_no', 'N/A')}"
+            )
             complete_count += 1
         elif result["status"] == "incomplete":
             print(
-                f"  ⚠ Incomplete: PO={result['po_number']}, Amount={result['amount']}"
+                f"  ⚠ Incomplete: PO={result['po_number']}, Amount={result['amount']}, Invoice={result.get('invoice_no', 'N/A')}"
             )
             incomplete_count += 1
         elif result["status"] == "error":
             print(f"  ✗ Error: {result['notes']}")
             error_count += 1
+        elif result["status"] == "skipped":
+            print(f"  ⊘ Skipped: {result['notes']}")
 
     print("\n" + "=" * 70)
     print(

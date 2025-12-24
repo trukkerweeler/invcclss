@@ -52,6 +52,7 @@ def add_supplier_location(
 ):
     """
     Add or update location mappings for a supplier.
+    Merges with existing locations (doesn't overwrite them).
 
     Args:
         supplier_code: Supplier code
@@ -68,8 +69,12 @@ def add_supplier_location(
         )
 
     config = load_config()
-    config[supplier_code] = {}
 
+    # Get existing supplier config or create new one
+    if supplier_code not in config:
+        config[supplier_code] = {}
+
+    # Update only the fields that were provided (merge, don't overwrite)
     if po_box:
         config[supplier_code]["po"] = po_box
     if amount_box:
