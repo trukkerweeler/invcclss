@@ -1125,8 +1125,12 @@ def create_manual_entry_ui(
     po_candidates: List[str],
     extracted_amount: Optional[str] = None,
     extracted_invoice: Optional[str] = None,
+    supplier_code: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]]:
-    """Display PDF with input fields for manual PO, invoice no, amount, check no, and receiver ID entry."""
+    """Display PDF with input fields for manual PO, invoice no, amount, check no, and receiver ID entry.
+
+    If supplier_code is provided and has location profiles, draws colored frames on the PDF preview.
+    """
     win = tk.Tk()
     win.title(f"Manual Entry: {filename}")
     win.geometry("1400x800+100+50")  # +100+50 offsets window position to the right
@@ -1245,24 +1249,234 @@ def create_manual_entry_ui(
     ).pack(pady=5)
     ttk.Button(button_frame, text="Skip File", command=skip, width=18).pack(pady=5)
 
-    # RIGHT SIDE: PDF preview (larger)
+    # RIGHT SIDE: PDF preview with magnifier
     pdf_frame = ttk.LabelFrame(main_frame, text="PDF Preview (First Page)")
     pdf_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
     try:
+        # Load PDF
         pdf_doc = fitz.open(pdf_path)
         page = pdf_doc[0]
-        pix = page.get_pixmap(
-            matrix=fitz.Matrix(0.9, 0.9)
-        )  # 90% scale for larger display (20% increase)
-        img_data = pix.tobytes("ppm")
-        img = Image.open(io.BytesIO(img_data))
 
-        photo = ImageTk.PhotoImage(img)
+        # Store original image for zoom operations
+        original_pix = page.get_pixmap(matrix=fitz.Matrix(0.9, 0.9))
+        original_img_data = original_pix.tobytes("ppm")
+        original_img = Image.open(io.BytesIO(original_img_data))
+        original_width, original_height = original_img.size
 
-        pdf_label = ttk.Label(pdf_frame, image=photo)
-        pdf_label.image = photo  # Keep a reference!
-        pdf_label.pack(fill=tk.BOTH, expand=True)
+        # Store page dimensions for location frame drawing
+        page_width_points = [page.rect.width]
+        page_height_points = [page.rect.height]
+
+        # Variables for zoom and pan
+        zoom_level = [1.0]  # Use list to allow modification in nested functions
+        pan_x = [0]
+        pan_y = [0]
+        is_panning = [False]
+        pan_start = [0, 0]
+        show_frames = [True]  # Toggle for showing/hiding location frames
+
+        # Zoom controls frame
+        zoom_frame = ttk.Frame(pdf_frame)
+        zoom_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        ttk.Label(zoom_frame, text="Zoom:").pack(side=tk.LEFT, padx=5)
+
+        zoom_var = tk.IntVar(value=100)
+        zoom_slider = ttk.Scale(
+            zoom_frame,
+            from_=50,
+            to=300,
+            orient=tk.HORIZONTAL,
+            variable=zoom_var,
+            command=lambda x: update_display(),
+        )
+        zoom_slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+
+        zoom_label = ttk.Label(zoom_frame, text="100%", width=5)
+        zoom_label.pack(side=tk.LEFT, padx=5)
+
+        def reset_zoom():
+            zoom_var.set(100)
+            pan_x[0] = 0
+            pan_y[0] = 0
+            update_display()
+
+        ttk.Button(zoom_frame, text="Reset", command=reset_zoom, width=8).pack(
+            side=tk.LEFT, padx=2
+        )
+
+        # Frames toggle
+        def toggle_frames():
+            show_frames[0] = not show_frames[0]
+            frames_btn.config(text=f"{'Hide' if show_frames[0] else 'Show'} Frames")
+            update_display()
+
+        frames_btn = ttk.Button(
+            zoom_frame,
+            text="Hide Frames" if show_frames[0] else "Show Frames",
+            command=toggle_frames,
+            width=12,
+        )
+        frames_btn.pack(side=tk.LEFT, padx=2)
+
+        # Canvas for PDF display with scrolling
+        canvas_frame = ttk.Frame(pdf_frame)
+        canvas_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Create canvas with scrollbars
+        canvas = tk.Canvas(canvas_frame, bg="gray90", highlightthickness=0)
+        h_scrollbar = ttk.Scrollbar(
+            canvas_frame, orient=tk.HORIZONTAL, command=canvas.xview
+        )
+        v_scrollbar = ttk.Scrollbar(
+            canvas_frame, orient=tk.VERTICAL, command=canvas.yview
+        )
+
+        canvas.config(xscrollcommand=h_scrollbar.set, yscrollcommand=v_scrollbar.set)
+
+        h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        pdf_image_id = [None]  # Store image ID for updating
+        location_rect_ids = []  # Store location rectangle IDs for clearing
+
+        def update_display():
+            """Update PDF display based on current zoom and pan settings."""
+            zoom_level[0] = zoom_var.get() / 100.0
+            zoom_label.config(text=f"{zoom_var.get()}%")
+
+            # Resize image based on zoom
+            new_width = int(original_width * zoom_level[0])
+            new_height = int(original_height * zoom_level[0])
+            resized_img = original_img.resize(
+                (new_width, new_height), Image.Resampling.LANCZOS
+            )
+
+            # Apply pan offset
+            photo = ImageTk.PhotoImage(resized_img)
+
+            # Update or create canvas image
+            if pdf_image_id[0] is None:
+                pdf_image_id[0] = canvas.create_image(0, 0, image=photo, anchor=tk.NW)
+            else:
+                canvas.itemconfig(pdf_image_id[0], image=photo)
+
+            # Store reference to prevent garbage collection
+            canvas.image = photo
+
+            # Clear previous location rectangles
+            for rect_id in location_rect_ids:
+                canvas.delete(rect_id)
+            location_rect_ids.clear()
+
+            # Draw location frames if supplier has location profile and frames are enabled
+            if supplier_code and show_frames[0]:
+                try:
+                    location_profile = get_supplier_location(supplier_code)
+                    if location_profile:
+                        # Get page dimensions in pixels (accounting for the 0.9x initial zoom)
+                        page_width_pixels = original_width
+                        page_height_pixels = original_height
+
+                        # Scale factor from PDF points to canvas pixels
+                        scale_x = page_width_pixels / page_width_points[0]
+                        scale_y = page_height_pixels / page_height_points[0]
+
+                        # Color mapping for different field types
+                        colors = {
+                            "po": "#00FF00",  # Green
+                            "amount": "#0000FF",  # Blue
+                            "invoice": "#FF0000",  # Red
+                        }
+
+                        # Draw rectangles for each location
+                        for field_type, color in colors.items():
+                            if field_type in location_profile:
+                                box = location_profile[field_type]
+                                # Check if it's for the current page (page 0)
+                                if box.get("page", 0) == 0:
+                                    # Convert PDF points to canvas pixels
+                                    x0 = int(box["x0"] * scale_x * zoom_level[0])
+                                    y0 = int(box["y0"] * scale_y * zoom_level[0])
+                                    x1 = int(box["x1"] * scale_x * zoom_level[0])
+                                    y1 = int(box["y1"] * scale_y * zoom_level[0])
+
+                                    # Draw rectangle with labels
+                                    rect_id = canvas.create_rectangle(
+                                        x0, y0, x1, y1, outline=color, width=2, fill=""
+                                    )
+                                    location_rect_ids.append(rect_id)
+
+                                    # Add label
+                                    label_text = f"{field_type.upper()}"
+                                    text_id = canvas.create_text(
+                                        x0 + 5,
+                                        y0 + 5,
+                                        text=label_text,
+                                        fill=color,
+                                        font=("Arial", 10, "bold"),
+                                        anchor=tk.NW,
+                                    )
+                                    location_rect_ids.append(text_id)
+                except Exception as e:
+                    print(f"Error drawing location frames: {e}")
+
+            # Update canvas scroll region
+            canvas.config(scrollregion=canvas.bbox("all"))
+
+        def on_mouse_wheel(event):
+            """Handle mouse wheel zoom."""
+            # Determine scroll direction
+            # Windows: event.delta > 0 is up, < 0 is down
+            # Linux: event.num == 4 is up, event.num == 5 is down
+            is_scroll_up = (hasattr(event, "delta") and event.delta > 0) or (
+                hasattr(event, "num") and event.num == 4
+            )
+
+            if is_scroll_up:  # Scroll up - zoom in
+                new_zoom = min(300, zoom_var.get() + 10)
+            else:  # Scroll down - zoom out
+                new_zoom = max(50, zoom_var.get() - 10)
+
+            zoom_var.set(new_zoom)
+            return "break"  # Prevent default behavior
+
+        def on_button_press(event):
+            """Start panning."""
+            is_panning[0] = True
+            pan_start[0] = event.x
+            pan_start[1] = event.y
+
+        def on_button_release(event):
+            """Stop panning."""
+            is_panning[0] = False
+
+        def on_motion(event):
+            """Pan while dragging."""
+            if is_panning[0]:
+                dx = event.x - pan_start[0]
+                dy = event.y - pan_start[1]
+                canvas.xview_scroll(-dx, "units")
+                canvas.yview_scroll(-dy, "units")
+                pan_start[0] = event.x
+                pan_start[1] = event.y
+
+        # Bind mouse events to window to capture all events
+        win.bind_all("<Button-4>", on_mouse_wheel)  # Linux scroll up
+        win.bind_all("<Button-5>", on_mouse_wheel)  # Linux scroll down
+        win.bind_all("<MouseWheel>", on_mouse_wheel)  # Windows scroll
+        canvas.bind("<Button-2>", on_button_press)  # Middle mouse button
+        canvas.bind("<ButtonRelease-2>", on_button_release)
+        canvas.bind("<B2-Motion>", on_motion)
+
+        # Focus canvas to ensure events are captured
+        canvas.focus_set()
+
+        # Initial display
+        update_display()
+
         pdf_doc.close()
     except Exception as e:
         ttk.Label(pdf_frame, text=f"Could not load PDF: {e}").pack()
@@ -1306,6 +1520,26 @@ def process_file_with_supplier(pdf_path: str, filename: str) -> Dict:
             result[
                 "notes"
             ] += "Skipped: Invalid date format (YYYY-MMDD). Expected YYYY-MM."
+            result["status"] = "skipped"
+            # Save to database before returning
+            save_extraction_result(
+                filename=filename,
+                file_path=pdf_path,
+                supplier_code="N/A",
+                po_number=None,
+                amount=None,
+                invoice_no=None,
+                check_no=None,
+                receiver_id=None,
+                human_field="N",
+                status="skipped",
+            )
+            update_extraction_status(filename, "skipped", result["notes"])
+            return result
+
+        # Step 0.5: Check if file exists
+        if not os.path.exists(pdf_path):
+            result["notes"] += f"Skipped: File not found at {pdf_path}"
             result["status"] = "skipped"
             # Save to database before returning
             save_extraction_result(
@@ -1411,6 +1645,7 @@ def process_file_with_supplier(pdf_path: str, filename: str) -> Dict:
                 po_candidates or [],
                 str(result.get("amount", "")) or "",
                 result.get("invoice_no") or "",
+                supplier_code,
             )
         except Exception as e:
             print(f"  ✗ Error in manual entry UI: {e}")
